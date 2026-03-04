@@ -56,11 +56,11 @@ if __name__ == "__main__":
     # You can call the function once manually to test
     print("Initializing Auto-Tracker Master Service...")
     
-    # Note: For production initialization, uncomment this to run immediately upon startup before entering loop
-    # execute_pipeline()
+    # Run the pipeline immediately upon startup before entering the schedule loop
+    execute_pipeline()
     
     # Define the hands-free schedule
-    schedule.every(2).hours.do(execute_pipeline)
+    schedule.every(5).minutes.do(execute_pipeline)
     
     print("\nScheduler configured. Engine will automatically run every 2 hours.")
     print("Press Ctrl+C to terminate the tracker.")

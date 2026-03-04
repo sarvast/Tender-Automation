@@ -1,7 +1,6 @@
 import os
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
@@ -23,8 +22,8 @@ class Tender(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     gem_bid_number = Column(String, unique=True, index=True, nullable=False)
     department_name = Column(String, nullable=True)
-    # Using PostgreSQL specific ARRAY type for list of strings
-    item_categories = Column(ARRAY(String), nullable=True)
+    # Using JSON type for list of strings (compatible with SQLite)
+    item_categories = Column(JSON, nullable=True)
     estimated_value = Column(Float, nullable=True)
     emd_amount = Column(Float, nullable=True)
     bid_end_date = Column(DateTime, nullable=False)

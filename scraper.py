@@ -1,5 +1,6 @@
 import time
 import random
+import re
 from datetime import datetime
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -8,151 +9,180 @@ from config import TARGET_KEYWORDS
 from models import SessionLocal
 from database_manager import process_and_save_bids, check_bid_exists
 
-# Note: GeM Advanced Search URL is a placeholder
-GEM_SEARCH_URL = "https://bidplus.gem.gov.in/advance-search"
+GEM_SEARCH_URL = "https://bidplus.gem.gov.in/all-bids"
 
 def parse_date(date_str):
-    """
-    Placeholder function to parse the bid end date string.
-    Will be updated based on actual GeM portal format.
-    """
     try:
-        # Assuming format "2024-12-31 23:59:59" for now
-        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-    except Exception:
-        # Fallback to current time if parsing fails
-        return datetime.now()
-
-def parse_float(value_str):
-    """
-    Placeholder function to extract float values from strings like '₹ 1,50,000.00'.
-    """
-    try:
-        cleaned = "".join([c for c in value_str if c.isdigit() or c == '.'])
-        return float(cleaned) if cleaned else None
+        date_str = date_str.replace('\xa0', ' ').replace('\n', ' ').strip()
+        # Try multiple GeM date formats
+        for fmt in ["%d-%m-%Y %I:%M %p", "%d-%m-%Y %H:%M"]:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except Exception:
+                continue
+        return None
     except Exception:
         return None
 
+def scrape_keyword(page, keyword):
+    """Search GeM for keyword and return parsed bid cards."""
+    try:
+        page.goto(GEM_SEARCH_URL, wait_until="domcontentloaded")
+        time.sleep(2)
+
+        # Fill the search box (id="searchBid" on all-bids page)
+        page.wait_for_selector("input#searchBid", timeout=8000)
+        page.fill("input#searchBid", "")
+        page.fill("input#searchBid", keyword)
+        time.sleep(0.3)
+        # Press Enter to trigger search (most reliable cross-browser method)
+        page.press("input#searchBid", "Enter")
+
+        # Wait for results to load - check either results or "no records" message
+        try:
+            page.wait_for_function(
+                """
+                document.querySelectorAll('#pagi_content .card').length > 0 ||
+                document.querySelector('#pagi_content') !== null
+                """,
+                timeout=12000
+            )
+        except Exception:
+            pass
+
+        time.sleep(2)  # Buffer for full AJAX render
+
+        # Try to click Sort -> "Bid Start Date: Latest First"
+        try:
+            sort_btn = page.query_selector(".sort button, button.sort, .sort-dropdown button")
+            if sort_btn:
+                sort_btn.click()
+                time.sleep(0.8)
+                page.click("text=Bid Start Date: Latest First")
+                time.sleep(2)
+        except Exception as e:
+            pass  # Sort failed silently - still proceed
+
+        html = page.content()
+
+        # Debug: Check what's in #pagi_content
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.select_one("#pagi_content")
+        if container:
+            cards = container.select(".card")
+            print(f"  [Debug] #pagi_content found. .card inside: {len(cards)}")
+            if len(cards) == 0:
+                # Print snippet of container to understand structure
+                snippet = container.text.strip()[:200]
+                print(f"  [Debug] Container snippet: {snippet}")
+        else:
+            print(f"  [Debug] #pagi_content NOT found in HTML!")
+            # Save HTML for inspection
+            with open("debug_last_page.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            print(f"  [Debug] Saved debug_last_page.html for inspection")
+
+        return soup, container
+
+    except Exception as e:
+        print(f"  [Nav Error] {e}")
+        return None, None
+
 def run_scraper():
-    """
-    Main extraction loop to scrape GeM portal bids based on configured brands/keywords.
-    """
     print("Initializing Playwright scraper...")
-    # Using Playwright's sync manager
     with sync_playwright() as p:
-        # headless=True for production
-        # NOTE FOR DEVELOPER: Change to headless=False during development/debugging to watch the automation
-        browser = p.chromium.launch(headless=True)
-        # Adding a common user agent to reduce bot detection
+        browser = p.chromium.launch(headless=False)
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800}
         )
         page = context.new_page()
 
-        # The Extraction Loop
         for brand, keywords in TARGET_KEYWORDS.items():
-            print(f"\n--- Starting extraction for Brand: {brand} ---")
-            
+            print(f"\n--- Brand: {brand} ---")
             for keyword in keywords:
-                print(f"Scraping keyword: '{keyword}'")
-                scraped_data = [] # Data Structure array
-                
-                try:
-                    # Instruct browser to navigate to advanced search
-                    page.goto(GEM_SEARCH_URL, wait_until="networkidle")
-                    
-                    # Anti-Bot Evasion: Sleep for random uniform delay between 3 and 7 seconds
-                    delay = random.uniform(3.0, 7.0)
-                    print(f"  [Anti-Bot] Sleeping for {delay:.2f} seconds...")
-                    time.sleep(delay)
-                    
-                    # Ensure latest bids are on top by clicking Sort -> Published Date (Descending)
-                    print("  [UI] Simulating click to sort by 'Published Date (Descending)'...")
-                    # Note to developer: Update this placeholder selector with actual GeM UI button
-                    try:
-                         page.click("button.sort-by-date-desc", timeout=5000)
-                         page.wait_for_load_state("networkidle")
-                         time.sleep(2) # brief pause after sort
-                    except Exception as e:
-                         print(f"  [UI Warning] Could not click sort button (selector might need updating): {e}")
+                print(f"  Searching: '{keyword}'")
+                scraped_data = []
 
-                    # Retrieve the HTML DOM state
-                    html_content = page.content()
-                    
-                    # DOM Parsing using BeautifulSoup
-                    soup = BeautifulSoup(html_content, "html.parser")
-                    
-                    # Notebook: Generic CSS selector placeholders
-                    bid_cards = soup.select("div.bid-card")
-                    print(f"  Found {len(bid_cards)} bid cards on the page.")
-                    
-                    for card in bid_cards:
-                        try:
-                            # Use generic placeholder selectors that the dev can update easily later via inspection
-                            bid_number_elem = card.select_one("span.bid-number")
-                            
-                            if not bid_number_elem:
-                                continue # Invalid card if no bid number
-                                
-                            bid_number = bid_number_elem.text.strip()
-                            
-                            # The Break Logic: Short-Circuit Incremental Scraping
-                            # Open a quick session just for checking
-                            with SessionLocal() as check_session:
-                                if check_bid_exists(bid_number, check_session):
-                                    print(f"  [Short-Circuit] Bid '{bid_number}' already exists. Breaking loop for keyword '{keyword}' to save resources.")
-                                    break # Exit the bid cards loop immediately, moving to the next keyword
-                            
-                            dept_elem = card.select_one("span.department")
-                            items_elem = card.select_one("span.items")
-                            value_elem = card.select_one("span.estimated-value")
-                            emd_elem = card.select_one("span.emd-amount")
-                            date_elem = card.select_one("span.end-date")
-                            mii_elem = card.select_one("span.mii-flag")
-                            mse_elem = card.select_one("span.mse-flag")
-                            
-                            # Dictionary holding current bid state
-                            bid_data = {
-                                'gem_bid_number': bid_number,
-                                'department_name': dept_elem.text.strip() if dept_elem else None,
-                                'item_categories': [i.strip() for i in items_elem.text.split(",")] if items_elem else [],
-                                'estimated_value': parse_float(value_elem.text.strip()) if value_elem else None,
-                                'emd_amount': parse_float(emd_elem.text.strip()) if emd_elem else None,
-                                'bid_end_date': parse_date(date_elem.text.strip()) if date_elem else None,
-                                'mii_applicable': True if mii_elem and "Yes" in mii_elem.text else False,
-                                'mse_preference': True if mse_elem and "Yes" in mse_elem.text else False
-                            }
-                            
-                            # Append successfully parsed bid Dict
-                            scraped_data.append(bid_data)
-                            
-                        except Exception as e:
-                            # Try-except block around individual bids so script doesn't crash on slightly broken HTML
-                            print(f"  [Error] Failed to parse a bid card for '{keyword}': {e}")
+                soup, results_container = scrape_keyword(page, keyword)
+                if not results_container:
+                    print(f"  -> No results container found, skipping.")
+                    continue
+
+                bid_cards = results_container.select(".card")
+                print(f"  Found {len(bid_cards)} bid cards.")
+
+                for card in bid_cards:
+                    try:
+                        card_text = card.get_text(separator=" ", strip=True)
+
+                        # Extract Bid Number
+                        bid_match = re.search(r"GEM/\d{4}/[BR]/\d+", card_text)
+                        if not bid_match:
+                            print(f"    [Skip] No bid number in card: {card_text[:80]}")
                             continue
-                            
-                except Exception as e:
-                    print(f"  [Error] Failed to scrape page for '{keyword}': {e}")
-                
-                # Data Handoff step
+                        bid_number = bid_match.group(0).strip()
+                        print(f"    Processing: {bid_number}")
+
+                        # Skip duplicates
+                        with SessionLocal() as check_session:
+                            if check_bid_exists(bid_number, check_session):
+                                print(f"    [Dup] Already in DB")
+                                continue
+
+                        # End Date
+                        end_date_elem = card.select_one(".end_date")
+                        if end_date_elem:
+                            bid_end_date = parse_date(end_date_elem.get_text(strip=True))
+                        else:
+                            # Try regex fallback
+                            end_match = re.search(r"End Date:\s*(\d{2}-\d{2}-\d{4}\s+\d+:\d+\s*[AP]M)", card_text)
+                            bid_end_date = parse_date(end_match.group(1)) if end_match else None
+
+                        # Skip expired bids
+                        if bid_end_date and bid_end_date < datetime.now():
+                            print(f"    [Expired] {bid_end_date.strftime('%d %b %Y')}")
+                            continue
+
+                        # Items
+                        items_match = re.search(r"Items:\s*(.+?)(?:Quantity:|Department Name|$)", card_text, re.DOTALL)
+                        items_text = items_match.group(1).strip()[:200] if items_match else keyword
+
+                        # Department
+                        dept_match = re.search(r"Department Name And Address:\s*(.+?)(?:Start Date:|$)", card_text, re.DOTALL)
+                        dept_text = dept_match.group(1).strip()[:300] if dept_match else "N/A"
+
+                        scraped_data.append({
+                            'gem_bid_number': bid_number,
+                            'department_name': dept_text,
+                            'item_categories': [items_text],
+                            'estimated_value': None,
+                            'emd_amount': None,
+                            'bid_end_date': bid_end_date,
+                            'mii_applicable': "MII" in card_text,
+                            'mse_preference': "MSE" in card_text
+                        })
+
+                    except Exception as e:
+                        print(f"    [Card Error] {e}")
+                        continue
+
                 if scraped_data:
-                    print(f"  -> Extracted {len(scraped_data)} bids. Passing to database manager...")
-                    # Open a fresh Database session
                     db = SessionLocal()
                     try:
-                        # Call logic from database_manager
                         new_inserts = process_and_save_bids(scraped_data, db)
-                        print(f"  Saved {new_inserts} NEW bids to the database.")
+                        print(f"  -> Saved {new_inserts} NEW bids to DB.")
                     except Exception as e:
                         db.rollback()
-                        print(f"  [DB Error] Failed to save bids: {e}")
+                        print(f"  [DB Error] {e}")
                     finally:
-                        # Close DB Session
                         db.close()
                 else:
-                    print(f"  -> No data parsed for keyword: {keyword}")
+                    print(f"  -> No new bids to save for: '{keyword}'")
 
-        print("\nAll brand keywords scraped successfully.")
+                time.sleep(random.uniform(1.5, 2.5))
+
+        print("\nAll brands scraped.")
         browser.close()
 
 if __name__ == "__main__":
