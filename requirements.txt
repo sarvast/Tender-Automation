@@ -1,0 +1,10 @@
+playwright
+beautifulsoup4
+fastapi
+uvicorn
+SQLAlchemy
+psycopg2-binary
+pandas
+openpyxl
+python-dotenv
+schedule 
