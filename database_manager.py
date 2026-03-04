@@ -30,3 +30,9 @@ def process_and_save_bids(scraped_bids_list, db_session):
         db_session.commit()
     
     return new_bids_added
+def check_bid_exists(bid_number: str, db_session) -> bool:  
+    """  
+    Checks if a bid strictly exists in the SQLite database by gem_bid_number to trigger a short-circuit early exit in scraping.  
+    """  
+    bid = db_session.query(Tender).filter_by(gem_bid_number=bid_number).first()  
+    return bid is not None 

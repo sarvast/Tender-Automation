@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 from config import TARGET_KEYWORDS
 from models import SessionLocal
-from database_manager import process_and_save_bids
+from database_manager import process_and_save_bids, check_bid_exists
 
 # Note: GeM Advanced Search URL is a placeholder
 GEM_SEARCH_URL = "https://bidplus.gem.gov.in/advance-search"
@@ -66,6 +66,16 @@ def run_scraper():
                     print(f"  [Anti-Bot] Sleeping for {delay:.2f} seconds...")
                     time.sleep(delay)
                     
+                    # Ensure latest bids are on top by clicking Sort -> Published Date (Descending)
+                    print("  [UI] Simulating click to sort by 'Published Date (Descending)'...")
+                    # Note to developer: Update this placeholder selector with actual GeM UI button
+                    try:
+                         page.click("button.sort-by-date-desc", timeout=5000)
+                         page.wait_for_load_state("networkidle")
+                         time.sleep(2) # brief pause after sort
+                    except Exception as e:
+                         print(f"  [UI Warning] Could not click sort button (selector might need updating): {e}")
+
                     # Retrieve the HTML DOM state
                     html_content = page.content()
                     
@@ -80,6 +90,19 @@ def run_scraper():
                         try:
                             # Use generic placeholder selectors that the dev can update easily later via inspection
                             bid_number_elem = card.select_one("span.bid-number")
+                            
+                            if not bid_number_elem:
+                                continue # Invalid card if no bid number
+                                
+                            bid_number = bid_number_elem.text.strip()
+                            
+                            # The Break Logic: Short-Circuit Incremental Scraping
+                            # Open a quick session just for checking
+                            with SessionLocal() as check_session:
+                                if check_bid_exists(bid_number, check_session):
+                                    print(f"  [Short-Circuit] Bid '{bid_number}' already exists. Breaking loop for keyword '{keyword}' to save resources.")
+                                    break # Exit the bid cards loop immediately, moving to the next keyword
+                            
                             dept_elem = card.select_one("span.department")
                             items_elem = card.select_one("span.items")
                             value_elem = card.select_one("span.estimated-value")
@@ -87,11 +110,6 @@ def run_scraper():
                             date_elem = card.select_one("span.end-date")
                             mii_elem = card.select_one("span.mii-flag")
                             mse_elem = card.select_one("span.mse-flag")
-                            
-                            if not bid_number_elem:
-                                continue # Invalid card if no bid number
-                                
-                            bid_number = bid_number_elem.text.strip()
                             
                             # Dictionary holding current bid state
                             bid_data = {
