@@ -261,27 +261,27 @@ def run_scraper():
                             
                         print(f"    Extracted Qty: {quantity}")
 
-                            # --- DATE FILTER: Skip bids that are too old ---
-                            if bid_start_date is not None:
-                                age_days = (datetime.now() - bid_start_date).days
-                                if age_days > MAX_BID_AGE_DAYS:
-                                    print(f"    [Skip] Bid too old ({age_days} days): {bid_number}")
-                                    continue
+                        # --- DATE FILTER: Skip bids that are too old ---
+                        if bid_start_date is not None:
+                            age_days = (datetime.now() - bid_start_date).days
+                            if age_days > MAX_BID_AGE_DAYS:
+                                print(f"    [Skip] Bid too old ({age_days} days): {bid_number}")
+                                continue
 
-                            scraped_data.append({
-                                'gem_bid_number': bid_number,
-                                'department_name': dept_text,
-                                'category': brand,
-                                'item_categories': [items_text],
-                                'quantity': quantity,
-                                'estimated_value': None,
-                                'emd_amount': emd_amount,
-                                'bid_start_date': bid_start_date,
-                                'bid_end_date': bid_end_date,
-                                'mii_applicable': "MII" in card_text,
-                                'mse_preference': "MSE" in card_text,
-                                'document_url': doc_url
-                            })
+                        scraped_data.append({
+                            'gem_bid_number': bid_number,
+                            'department_name': dept_text,
+                            'category': brand,
+                            'item_categories': [items_text],
+                            'quantity': quantity,
+                            'estimated_value': None,
+                            'emd_amount': emd_amount,
+                            'bid_start_date': bid_start_date,
+                            'bid_end_date': bid_end_date,
+                            'mii_applicable': "MII" in card_text,
+                            'mse_preference': "MSE" in card_text,
+                            'document_url': doc_url
+                        })
 
                     except Exception as e:
                         print(f"    [Card Error] {e}")
