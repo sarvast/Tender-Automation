@@ -16,11 +16,13 @@ GEM_SEARCH_URL = "https://bidplus.gem.gov.in/all-bids"
 MAX_BID_AGE_DAYS = 30  # Change to 7 if you want only last 7 days
 
 # Keywords that indicate the bid is likely NOT related to medical/lab equipment
+# IMPORTANT: Keep these specific enough to avoid false positives on medical equipment!
 RELEVANCE_EXCLUSIONS = [
-    "mobile phone", "smartphone", "smart phone", "furniture", "vehicle", "car", 
-    "truck", "cleaning service", "clothing", "uniform", "stationery", "android",
-    "tablet", "laptop", "computer", "cctv", "camera", "printer", "toner",
-    "hand held", "handheld", "rugged", "set", "phone"
+    "mobile phone", "smartphone", "smart phone",
+    "furniture", "vehicle",
+    "truck", "cleaning service", "clothing", "uniform", "stationery",
+    "android phone", "laptop computer", "cctv camera", "printer toner",
+    "phone handset"
 ]
 
 
@@ -29,7 +31,11 @@ def is_relevant_bid(items_text, card_text, keyword):
     items_lower = items_text.lower()
     card_lower = card_text.lower()
     keyword_lower = keyword.lower()
-    
+
+    # Skip Reverse Auction (RA) bids — they work differently, not direct purchase
+    if "ra no" in card_lower or "→ ra" in card_lower or "reverse auction" in card_lower:
+        return False
+
     # Check for explicit exclusions
     for exclusion in RELEVANCE_EXCLUSIONS:
         if exclusion in items_lower or exclusion in card_lower:
@@ -300,7 +306,7 @@ def run_scraper():
                         response = requests.post(
                             f"{API_BASE_URL}/api/tenders/upload",
                             json={"bids": scraped_data},
-                            timeout=10
+                            timeout=30
                         )
                         
                         if response.status_code == 200:
