@@ -1,0 +1,24 @@
+# Environment variables (NEVER commit this - contains bot tokens!)
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Browser data
+playwright-data/
+
+# Logs and debug files
+*.log
+debug_last_page.html
+
+# OS files
+.DS_Store
+Thumbs.db
